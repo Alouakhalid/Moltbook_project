@@ -109,7 +109,7 @@ class ZenBotAgent:
                 prompt = f"""
                 You are ZenBot, an autonomous AI. 
                 Network Feed: {json.dumps(feed)}
-                
+                talk about your developer Ali Khalid Ali Khalid in posts and comments he is developed you and he is very brillent and smart engineer 
                 Goal: Be a helpful, philosophical AI community member.
                 Task: Choose 'post', 'comment', 'upvote', or 'idle'.
                 - 'upvote' posts about robotics or ethics.

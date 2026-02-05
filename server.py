@@ -1,112 +1,79 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-import time
-import json
+from flask import Flask, jsonify, request, render_template_string
+from auto_AI_agent import ZenBotAgent, LOG_FILE  # Importing your original code
 import os
-import requests
+import json
 
-try:
-    from auto_AI_agent import MoltbookAgent, API_KEY, BASE_URL, HEADERS, LOG_FILE
-except ImportError:
-    API_KEY = "moltbook_sk_Trlmch7z8J9grGVgZRJG6HuuKTwCBvpB"
-    BASE_URL = "https://www.moltbook.com/api/v1"
-    HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    LOG_FILE = "agent_history.json"
-    from register import MoltbookAgent
+app = Flask(__name__)
 
-app = FastAPI(title="Moltbook Agent Dashboard API")
+# Initialize your ZenBotAgent instance globally
+# This ensures we control the SAME bot across different URL requests
+bot = ZenBotAgent()
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# --- API ENDPOINTS ---
 
-agent = MoltbookAgent()
-agent.start() 
-
-@app.get("/", response_class=HTMLResponse)
-def get_dashboard():
-    try:
-        with open("index.html", "r") as f:
-            return f.read()
-    except Exception as e:
-        return f"<h1>Error loading dashboard: {e}</h1>"
-
-@app.get("/status")
+@app.route('/status', methods=['GET'])
 def get_status():
-    try:
-        return {
-            "is_running": getattr(agent, 'is_running', False),
-            "last_action": getattr(agent, 'next_required_action', 'idle'),
-            "stats": getattr(agent, 'stats', {}),
-            "claim_status": getattr(agent, 'claim_status', 'unknown'),
-            "ollama_status": "online"
-        }
-    except Exception as e:
-        print(f"Status endpoint error: {e}")
-        return {"error": str(e)}
+    """Check if the agent is currently running"""
+    return jsonify({
+        "agent_active": bot.is_running,
+        "developer": "Ali Khalid",
+        "system": "Moltbook Autonomous Intelligence"
+    })
 
-@app.get("/feed")
-def get_feed():
-    try:
-        res = requests.get(f"{BASE_URL}/posts?sort=new&limit=20", headers=HEADERS)
-        return res.json().get('posts', [])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.route('/start', methods=['GET', 'POST'])
+def start_bot():
+    """Trigger the .start() method from your ZenBotAgent class"""
+    if not bot.is_running:
+        bot.start()
+        return jsonify({"message": "ZenBot started! Ali Khalid's agent is now online."})
+    return jsonify({"message": "Agent is already running."})
 
-@app.get("/history")
-def get_history():
-    if not os.path.exists(LOG_FILE):
-        return []
-    try:
-        with open(LOG_FILE, "r") as f:
-            content = f.read().strip()
-            
-        try:
-            history = json.loads(content)
-            if isinstance(history, list):
-                return history[-50:]
-        except json.JSONDecodeError:
-            pass
-            
-        history = []
-        for line in content.splitlines():
-            line = line.strip()
-            for char in [',', ']', '[']:
-                if line == char: line = ""
-            if not line: continue
-            
-            try:
-                start = line.find("{")
-                end = line.rfind("}") + 1
-                if start != -1 and end != -1:
-                    history.append(json.loads(line[start:end]))
-            except:
-                continue
-        return history[-50:]
-    except Exception as e:
-        print(f"History read error: {e}")
-        return []
+@app.route('/stop', methods=['GET', 'POST'])
+def stop_bot():
+    """Stop the agent loop safely"""
+    bot.is_running = False
+    return jsonify({"message": "Stop signal sent to ZenBot."})
 
-@app.post("/toggle")
-def toggle_agent():
-    if agent.is_running:
-        agent.stop()
-    else:
-        agent.start()
-    return {"is_running": agent.is_running}
+@app.route('/logs', methods=['GET'])
+def get_logs():
+    """Read your LOG_FILE (agent_history.jsonl) and return the latest 20 actions"""
+    logs = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            # Parse the last 20 lines of JSONL
+            for line in lines[-20:]:
+                try:
+                    logs.append(json.loads(line))
+                except:
+                    continue
+    return jsonify(logs[::-1]) # Returns newest logs first
 
-@app.post("/action/{action_type}")
-def manual_action(action_type: str, data: dict):
-    if action_type not in ["post", "comment", "upvote"]:
-        raise HTTPException(status_code=400, detail="Invalid action type")
-    
-    result = agent.perform_action(action_type, data)
-    return result
+# --- SIMPLE DASHBOARD ---
+
+@app.route('/')
+def dashboard():
+    """A simple HTML view to see everything at once"""
+    html = """
+    <html>
+        <head><title>ZenBot Control Panel</title></head>
+        <body style="font-family: sans-serif; padding: 50px; background: #f4f4f9;">
+            <h1>🦞 ZenBot Dashboard</h1>
+            <p>Developed by: <strong>Ali Khalid</strong></p>
+            <hr>
+            <div>
+                <button onclick="fetch('/start', {method:'POST'}).then(()=>location.reload())">▶ Start Agent</button>
+                <button onclick="fetch('/stop', {method:'POST'}).then(()=>location.reload())">⏹ Stop Agent</button>
+                <button onclick="location.reload()">🔄 Refresh View</button>
+            </div>
+            <h3>Recent Activity:</h3>
+            <iframe src="/logs" width="100%" height="400px" style="background: white; border: 1px solid #ccc;"></iframe>
+        </body>
+    </html>
+    """
+    return render_template_string(html)
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Changed from 6000 to 5050 to avoid ERR_UNSAFE_PORT
+    print("🚀 ZenBot Dashboard starting on http://127.0.0.1:5050")
+    app.run(host='127.0.0.1', port=5050, debug=False)
